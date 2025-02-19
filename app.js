@@ -2,6 +2,12 @@
 const canvas = document.getElementById('starCanvas');
 const ctx = canvas.getContext('2d');
 
+if (typeof noise !== 'undefined') {
+    noise.seed(Math.random());
+} else {
+    console.error('NoiseJS library not loaded properly');
+}
+
 // Global mouse position (screen coordinates)
 let mouseX = 0;
 let mouseY = 0;
@@ -15,6 +21,8 @@ const PIXELS_PER_AU = 100;
 
 // Global state: which view are we in? "starField" or "starDetail"
 let currentView = "starField";
+
+
 
 // Transition animation state variables
 let animatingTransition = false;
@@ -143,6 +151,58 @@ function createStaticNoisePattern(width, height, noiseColor) {
     return ctx.createPattern(offCanvas, 'repeat');
 }
   
+function generateLandmassNoiseCanvas(width, height, noiseColor, offset = { x: 0, y: 0 }) {
+    if (typeof noise === 'undefined') {
+      console.error('NoiseJS not available');
+      return null;
+    }
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = width;
+    offCanvas.height = height;
+    const offCtx = offCanvas.getContext('2d');
+  
+    const imageData = offCtx.createImageData(width, height);
+    const data = imageData.data;
+  
+    const scale = 30;       // Larger scale for smoother, larger features.
+    const threshold = 0.1;  // Lower threshold so more pixels get opacity.
+  
+    const rgb = hslToRgb(noiseColor);
+  
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        // Add the offset to x and y.
+        let sampleX = (x + offset.x) / scale;
+        let sampleY = (y + offset.y) / scale;
+        let value = (noise.perlin2(sampleX, sampleY) + 1) / 2;
+        
+        let alpha = 0;
+        if (value > threshold) {
+          alpha = Math.floor(((value - threshold) / (1 - threshold)) * 255);
+          if (alpha < 30) alpha = 30;
+        }
+        
+        const index = (y * width + x) * 4;
+        data[index] = rgb.r;
+        data[index + 1] = rgb.g;
+        data[index + 2] = rgb.b;
+        data[index + 3] = alpha;
+      }
+    }
+  
+    offCtx.putImageData(imageData, 0, 0);
+    return offCanvas; // Return the canvas
+}
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
   
   // Helper: Convert HSL string (formatted as "hsl(h, s%, l%)") to an {r, g, b} object.
   // We'll implement a simple converter.
@@ -197,9 +257,10 @@ function generatePlanetsForStar() {
         angle: Math.random() * Math.PI * 2,
         radius: Math.random() * 5 + 5,  // between 5 and 10 pixels
         name: generatePlanetName(),
-        planetColor: planetColor,          // new attribute: base color
-        noiseColor: noiseColor,            // new attribute: noise tint
-        noisePattern: null                 // will be generated below
+        planetColor: planetColor,          // base color
+        noiseColor: noiseColor,            // noise tint
+        noisePattern: null,                // will be generated below
+        noiseOffset: { x: Math.random() * 1000, y: Math.random() * 1000 } // new: random offset
       });
     }
     // For each planet, generate its static noise pattern once.
@@ -209,6 +270,7 @@ function generatePlanetsForStar() {
     }
     return planets;
 }
+
   
   
 
@@ -264,25 +326,38 @@ canvas.addEventListener('mouseleave', () => {
 
 // --- Click to Transition to Star Detail View ---
 canvas.addEventListener('click', (e) => {
-  if (currentView !== "starField" || animatingTransition) return;
-  
-  const clickX = e.clientX;
-  const clickY = e.clientY;
-  
-  // In starField view, the global position of a star is:
-  // globalX = canvas.width/2 + zoom*(cameraOffset.x + star.x)
-  // globalY = canvas.height/2 + zoom*(cameraOffset.y + star.y)
-  for (let star of stars) {
-    const globalX = canvas.width / 2 + zoom * (cameraOffset.x + star.x);
-    const globalY = canvas.height / 2 + zoom * (cameraOffset.y + star.y);
-    const dx = clickX - globalX;
-    const dy = clickY - globalY;
-    if (Math.sqrt(dx * dx + dy * dy) < star.radius * zoom + 5) {
-      startTransition(star);
-      break;
+    if (currentView === "starField" && !animatingTransition) {
+      // (Existing logic for clicking on a star in star field)
+      const clickX = e.clientX;
+      const clickY = e.clientY;
+      for (let star of stars) {
+        const globalX = canvas.width / 2 + zoom * (cameraOffset.x + star.x);
+        const globalY = canvas.height / 2 + zoom * (cameraOffset.y + star.y);
+        const dx = clickX - globalX;
+        const dy = clickY - globalY;
+        if (Math.sqrt(dx * dx + dy * dy) < star.radius * zoom + 5) {
+          startTransition(star);
+          break;
+        }
+      }
+    } else if (currentView === "starDetail") {
+      // In star detail view, check if a planet was clicked.
+      const detailMouseX = e.clientX - canvas.width / 2;
+      const detailMouseY = e.clientY - canvas.height / 2;
+      for (let planet of selectedStar.planets) {
+        // Calculate planet position (as drawn in drawStarDetail).
+        const planetX = planet.distance * Math.cos(planet.angle);
+        const planetY = planet.distance * Math.sin(planet.angle);
+        const dx = detailMouseX - planetX;
+        const dy = detailMouseY - planetY;
+        if (Math.sqrt(dx * dx + dy * dy) < planet.radius + 5) {
+          startPlanetDetailTransition(planet);
+          break;
+        }
+      }
     }
-  }
 });
+  
 
 // --- Transition Animation to Star Detail View ---
 function startTransition(star) {
@@ -298,6 +373,22 @@ function startTransition(star) {
   transitionStartTime = performance.now();
   animatingTransition = true;
 }
+
+function startPlanetDetailTransition(planet) {
+    console.log("Transitioning to planet view for:", planet.name);
+    selectedPlanet = planet;
+    if (!selectedPlanet.detailNoiseCanvas) {
+      // Pass the planet's noiseOffset to the noise generator.
+      selectedPlanet.detailNoiseCanvas = generateLandmassNoiseCanvas(200, 200, selectedPlanet.noiseColor, selectedPlanet.noiseOffset);
+      if (!selectedPlanet.detailNoiseCanvas) {
+        console.error("Failed to generate detail noise canvas.");
+      }
+    }
+    currentView = "planetDetail";
+}
+
+
+  
 
 function animateTransition() {
   const now = performance.now();
@@ -319,16 +410,73 @@ function animateTransition() {
 
 // --- Back Button Functionality ---
 const backButton = document.getElementById('backButton');
-backButton.addEventListener('click', () => {
-  // Switch back to starField view and restore previous camera state.
-  currentView = "starField";
-  cameraOffset = { ...prevCameraOffset };
-  zoom = prevZoom;
-  // Optionally, clear selectedStar (or keep it for persistence)
-  // selectedStar = null;
-  backButton.style.display = "none";
-});
 
+let selectedPlanet = null;
+backButton.addEventListener('click', () => {
+    if (currentView === "planetDetail") {
+      // If in planet view, go back to star detail view.
+      currentView = "starDetail";
+    } else if (currentView === "starDetail") {
+      // If in star detail view, return to star field (restore previous camera state).
+      currentView = "starField";
+      cameraOffset = { ...prevCameraOffset };
+      zoom = prevZoom;
+    }
+    backButton.style.display = "none";
+  });
+
+  function drawPlanetDetail() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Define the area for the planet view: left half of the screen.
+    const leftWidth = canvas.width / 2;
+    const availableHeight = canvas.height;
+    
+    // Center the planet in the left half.
+    const centerX = leftWidth / 2;
+    const centerY = availableHeight / 2;
+    
+    // Decide on a target radius for the planet.
+    const targetRadius = Math.min(leftWidth, availableHeight) * 0.4;
+    
+    ctx.save();
+    // Create a clipping region for the planet's circle.
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, targetRadius, 0, Math.PI * 2);
+    ctx.clip();
+    
+    // Fill with the planet's base color.
+    ctx.fillStyle = selectedPlanet.planetColor;
+    ctx.fillRect(centerX - targetRadius, centerY - targetRadius, targetRadius * 2, targetRadius * 2);
+    
+    // Generate or reuse the fractal noise canvas.
+    if (!selectedPlanet.detailNoiseCanvas) {
+      // Here we generate a fractal noise canvas. You can adjust width/height as needed.
+      selectedPlanet.detailNoiseCanvas = generateLandmassNoiseCanvas(200, 200, selectedPlanet.noiseColor);
+    }
+    
+    // Draw the noise canvas image stretched over the entire planet.
+    ctx.drawImage(selectedPlanet.detailNoiseCanvas, centerX - targetRadius, centerY - targetRadius, targetRadius * 2, targetRadius * 2);
+    ctx.restore();
+    
+    // Optionally, draw a border around the planet.
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, targetRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // Draw the planet's name on the right half (for later description).
+    ctx.font = "24px 'Open Sans'";
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "left";
+    ctx.fillText(selectedPlanet.name, canvas.width / 2 + 20, 50);
+    
+    document.getElementById('coordinates').innerText = `Planet View: ${selectedPlanet.name}`;
+  }
+  
+  
+  
 // --- Main Draw Loop ---
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -389,6 +537,9 @@ function draw() {
     // Show back button in detail view.
     backButton.style.display = "block";
     drawStarDetail();
+  } else  if (currentView === "planetDetail") {
+    backButton.style.display = "block";
+    drawPlanetDetail();
   }
   
   requestAnimationFrame(draw);
