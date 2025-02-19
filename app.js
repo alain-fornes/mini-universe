@@ -52,21 +52,128 @@ function generateStarName() {
   return name;
 }
 
+function getRandomStarColor() {
+    // Randomly choose between a "warm" star and a "cool" star
+    if (Math.random() < 0.5) {
+        // Warm stars: red/orange/yellow hues (0° to 60°)
+        let hue = Math.floor(Math.random() * 60);
+        return `hsl(${hue}, 100%, 60%)`;
+    } else {
+        // Cool stars: blue/cyan hues (180° to 240°)
+        let hue = Math.floor(180 + Math.random() * 60);
+        return `hsl(${hue}, 100%, 70%)`;
+    }
+}
+
 // Generate the star field (each star has x, y, radius, and a persistent name)
 function generateStars() {
-  stars = [];
-  for (let i = 0; i < STAR_COUNT; i++) {
-    const star = {
-      x: Math.random() * STAR_FIELD_SIZE - STAR_FIELD_SIZE / 2,
-      y: Math.random() * STAR_FIELD_SIZE - STAR_FIELD_SIZE / 2,
-      radius: Math.random() * 2 + 2, // between 2 and 4 pixels
-      name: generateStarName()
-    };
-    stars.push(star);
-  }
+    stars = [];
+    for (let i = 0; i < STAR_COUNT; i++) {
+        const star = {
+            x: Math.random() * STAR_FIELD_SIZE - STAR_FIELD_SIZE / 2,
+            y: Math.random() * STAR_FIELD_SIZE - STAR_FIELD_SIZE / 2,
+            radius: Math.random() * 2 + 2, // between 2 and 4 pixels
+            name: generateStarName(),
+            color: getRandomStarColor()  // new: assign a random star color
+        };
+        stars.push(star);
+    }
 }
+  
 generateStars();
 
+// Return a realistic planet color, favoring browns and greys (with some dark greens and blues)
+function getRealisticPlanetColor() {
+    const choices = [
+      { color: "hsl(30, 50%, 45%)", weight: 3 },  // brown
+      { color: "hsl(0, 0%, 50%)", weight: 3 },      // grey
+      { color: "hsl(120, 50%, 35%)", weight: 1 },    // dark green
+      { color: "hsl(210, 50%, 45%)", weight: 1 }     // blue
+    ];
+    const total = choices.reduce((sum, c) => sum + c.weight, 0);
+    let rand = Math.random() * total;
+    for (let choice of choices) {
+      if (rand < choice.weight) {
+        return choice.color;
+      }
+      rand -= choice.weight;
+    }
+    return choices[0].color; // fallback
+}
+  
+  // Return a realistic noise color (mostly dark browns and greys)
+function getRealisticNoiseColor() {
+    const choices = [
+      { color: "hsl(30, 50%, 30%)", weight: 3 },  // dark brown
+      { color: "hsl(0, 0%, 30%)", weight: 3 },      // dark grey
+      { color: "hsl(210, 50%, 30%)", weight: 1 }     // dark blue
+    ];
+    const total = choices.reduce((sum, c) => sum + c.weight, 0);
+    let rand = Math.random() * total;
+    for (let choice of choices) {
+      if (rand < choice.weight) {
+        return choice.color;
+      }
+      rand -= choice.weight;
+    }
+    return choices[0].color;
+}
+  
+  // Create a static noise pattern with larger blotches.
+  // Here we use an offscreen canvas divided into a 5x5 grid and randomly fill blocks.
+function createStaticNoisePattern(width, height, noiseColor) {
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = width;
+    offCanvas.height = height;
+    const offCtx = offCanvas.getContext('2d');
+  
+    const blocks = 50;
+    const blockWidth = width / blocks;
+    const blockHeight = height / blocks;
+    
+    for (let i = 0; i < blocks; i++) {
+      for (let j = 0; j < blocks; j++) {
+        if (Math.random() < 0.5) {
+          offCtx.fillStyle = noiseColor;
+          offCtx.fillRect(i * blockWidth, j * blockHeight, blockWidth, blockHeight);
+        }
+      }
+    }
+    // Return a repeating pattern created from the offscreen canvas.
+    return ctx.createPattern(offCanvas, 'repeat');
+}
+  
+  
+  // Helper: Convert HSL string (formatted as "hsl(h, s%, l%)") to an {r, g, b} object.
+  // We'll implement a simple converter.
+function hslToRgb(hslString) {
+    // Extract h, s, l values from the string.
+    // Example: "hsl(210, 80%, 60%)"
+    let [h, s, l] = hslString
+      .replace(/hsl\(|\)/g, '')
+      .split(',')
+      .map(v => parseFloat(v));
+    s /= 100;
+    l /= 100;
+    
+    let c = (1 - Math.abs(2 * l - 1)) * s;
+    let x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    let m = l - c / 2;
+    let r1, g1, b1;
+    if (h < 60) { r1 = c; g1 = x; b1 = 0; }
+    else if (h < 120) { r1 = x; g1 = c; b1 = 0; }
+    else if (h < 180) { r1 = 0; g1 = c; b1 = x; }
+    else if (h < 240) { r1 = 0; g1 = x; b1 = c; }
+    else if (h < 300) { r1 = x; g1 = 0; b1 = c; }
+    else { r1 = c; g1 = 0; b1 = x; }
+    
+    return {
+      r: Math.round((r1 + m) * 255),
+      g: Math.round((g1 + m) * 255),
+      b: Math.round((b1 + m) * 255)
+    };
+}
+  
 // --- Planet Generation for Star Detail View ---
 // Generate a planet name (different style from star names)
 function generatePlanetName() {
@@ -79,19 +186,31 @@ function generatePlanetName() {
 
 // Generate an array of planet objects for the selected star.
 function generatePlanetsForStar() {
-  const planetCount = Math.floor(Math.random() * 8) + 1; // 1 to 8 planets
-  const planets = [];
-  for (let i = 0; i < planetCount; i++) {
-    planets.push({
-      distance: Math.random() * 100 + 50,  // between 50 and 150 pixels
-      orbitalSpeed: Math.random() * 0.005 + 0.002, // slower: 0.002 to 0.007 radians per frame
-      angle: Math.random() * Math.PI * 2,
-      radius: Math.random() * 5 + 5,  // between 5 and 10 pixels
-      name: generatePlanetName()
-    });
-  }
-  return planets;
+    const planetCount = Math.floor(Math.random() * 8) + 1; // 1 to 8 planets
+    const planets = [];
+    for (let i = 0; i < planetCount; i++) {
+      const planetColor = getRealisticPlanetColor();
+      const noiseColor = getRealisticNoiseColor();
+      planets.push({
+        distance: Math.random() * 100 + 50,  // between 50 and 150 pixels
+        orbitalSpeed: Math.random() * 0.005 + 0.002, // 0.002 to 0.007 radians per frame
+        angle: Math.random() * Math.PI * 2,
+        radius: Math.random() * 5 + 5,  // between 5 and 10 pixels
+        name: generatePlanetName(),
+        planetColor: planetColor,          // new attribute: base color
+        noiseColor: noiseColor,            // new attribute: noise tint
+        noisePattern: null                 // will be generated below
+      });
+    }
+    // For each planet, generate its static noise pattern once.
+    for (let planet of planets) {
+      // Using a fixed offscreen canvas size (e.g., 50x50) for the pattern.
+      planet.noisePattern = createStaticNoisePattern(50, 50, planet.noiseColor);
+    }
+    return planets;
 }
+  
+  
 
 // --- Canvas Resize ---
 function resizeCanvas() {
@@ -226,33 +345,35 @@ function draw() {
     
     // Draw stars with hover glow and names (if hovered)
     for (let star of stars) {
-      const globalX = canvas.width / 2 + zoom * (cameraOffset.x + star.x);
-      const globalY = canvas.height / 2 + zoom * (cameraOffset.y + star.y);
-      const dx = globalX - mouseX;
-      const dy = globalY - mouseY;
-      const hovered = Math.sqrt(dx * dx + dy * dy) < star.radius * zoom + 5;
+        const globalX = canvas.width / 2 + zoom * (cameraOffset.x + star.x);
+        const globalY = canvas.height / 2 + zoom * (cameraOffset.y + star.y);
+        const dx = globalX - mouseX;
+        const dy = globalY - mouseY;
+        const hovered = Math.sqrt(dx * dx + dy * dy) < star.radius * zoom + 5;
       
-      if (hovered) {
-        let grad = ctx.createRadialGradient(star.x, star.y, star.radius, star.x, star.y, star.radius * 2);
-        grad.addColorStop(0, 'rgba(255,255,255,1)');
-        grad.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = grad;
+        if (hovered) {
+            let colorInner = star.color.replace("hsl(", "hsla(").replace(")", ",1)");
+            let colorOuter = star.color.replace("hsl(", "hsla(").replace(")", ",0)");
+            let grad = ctx.createRadialGradient(star.x, star.y, star.radius, star.x, star.y, star.radius * 2);
+            grad.addColorStop(0, colorInner);
+            grad.addColorStop(1, colorOuter);
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(star.x, star.y, star.radius * 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.save();
+            ctx.font = "16px 'Open Sans'";
+            ctx.fillStyle = "#fff";
+            ctx.textAlign = "center";
+            ctx.fillText(star.name, star.x, star.y - star.radius - 10);
+            ctx.restore();
+        }
+      
+        ctx.fillStyle = star.color;
         ctx.beginPath();
-        ctx.arc(star.x, star.y, star.radius * 2, 0, Math.PI * 2);
+        ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
         ctx.fill();
-        
-        ctx.save();
-        ctx.font = "16px 'Open Sans'";
-        ctx.fillStyle = "#fff";
-        ctx.textAlign = "center";
-        ctx.fillText(star.name, star.x, star.y - star.radius - 10);
-        ctx.restore();
-      }
-      
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
-      ctx.fill();
     }
     ctx.restore();
     
@@ -277,62 +398,77 @@ requestAnimationFrame(draw);
 // --- Draw Star Detail View ---
 // In detail view, the selected star is centered with its orbiting planets.
 function drawStarDetail() {
-  ctx.save();
-  ctx.translate(canvas.width / 2, canvas.height / 2);
-  
-  // Draw the central star.
-  ctx.fillStyle = "#fff";
-  ctx.beginPath();
-  ctx.arc(0, 0, selectedStar.radius, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Translate mouse to detail-view coordinates.
-  const detailMouseX = mouseX - canvas.width / 2;
-  const detailMouseY = mouseY - canvas.height / 2;
-  
-  if (selectedStar.planets) {
-    for (let planet of selectedStar.planets) {
-      // Update planet's orbital angle (orbit slower).
-      planet.angle += planet.orbitalSpeed;
-      const planetX = planet.distance * Math.cos(planet.angle);
-      const planetY = planet.distance * Math.sin(planet.angle);
-      
-      // Hover detection for planet.
-      const dx = planetX - detailMouseX;
-      const dy = planetY - detailMouseY;
-      const hovered = Math.sqrt(dx * dx + dy * dy) < planet.radius + 5;
-      
-      if (hovered) {
-        let grad = ctx.createRadialGradient(planetX, planetY, planet.radius, planetX, planetY, planet.radius * 2);
-        grad.addColorStop(0, 'rgba(255,255,255,1)');
-        grad.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(planetX, planetY, planet.radius * 2, 0, Math.PI * 2);
-        ctx.fill();
-        
-        ctx.save();
-        ctx.font = "16px 'Open Sans'";
-        ctx.fillStyle = "#fff";
-        ctx.textAlign = "center";
-        ctx.fillText(planet.name, planetX, planetY - planet.radius - 10);
-        ctx.restore();
-      }
-      
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(planetX, planetY, planet.radius, 0, Math.PI * 2);
-      ctx.fill();
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    
+    // Draw the central star using its stored color and a larger size.
+    const detailStarRadius = selectedStar.radius * 3; // scale factor; adjust as needed
+    ctx.fillStyle = selectedStar.color;
+    ctx.beginPath();
+    ctx.arc(0, 0, detailStarRadius, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Translate mouse to detail-view coordinates.
+    const detailMouseX = mouseX - canvas.width / 2;
+    const detailMouseY = mouseY - canvas.height / 2;
+    
+    if (selectedStar.planets) {
+        for (let planet of selectedStar.planets) {
+          // Update planet's orbital angle.
+          planet.angle += planet.orbitalSpeed;
+          const planetX = planet.distance * Math.cos(planet.angle);
+          const planetY = planet.distance * Math.sin(planet.angle);
+          
+          // Hover detection for planet.
+          const dx = planetX - detailMouseX;
+          const dy = planetY - detailMouseY;
+          const hovered = Math.sqrt(dx * dx + dy * dy) < planet.radius + 5;
+          
+          ctx.save();
+          // Create a clipping region in the shape of the planet.
+          ctx.beginPath();
+          ctx.arc(planetX, planetY, planet.radius, 0, Math.PI * 2);
+          ctx.clip();
+          
+          // Fill the planet's circle with its base color.
+          ctx.fillStyle = planet.planetColor;
+          ctx.fillRect(planetX - planet.radius, planetY - planet.radius, planet.radius * 2, planet.radius * 2);
+          
+          // Overlay the pre-generated noise pattern.
+          ctx.fillStyle = planet.noisePattern;
+          ctx.fillRect(planetX - planet.radius, planetY - planet.radius, planet.radius * 2, planet.radius * 2);
+          ctx.restore();
+          
+          // If hovered, draw a glow effect and the planet's name.
+          if (hovered) {
+            let grad = ctx.createRadialGradient(planetX, planetY, planet.radius, planetX, planetY, planet.radius * 2);
+            grad.addColorStop(0, 'rgba(255,255,255,1)');
+            grad.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(planetX, planetY, planet.radius * 2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.save();
+            ctx.font = "16px 'Open Sans'";
+            ctx.fillStyle = "#fff";
+            ctx.textAlign = "center";
+            ctx.fillText(planet.name, planetX, planetY - planet.radius - 10);
+            ctx.restore();
+          }
+        }
     }
-  }
-  
-  // Draw the star's name below it.
-  ctx.font = "20px 'Open Sans'";
-  ctx.fillStyle = "#fff";
-  ctx.textAlign = "center";
-  ctx.fillText(selectedStar.name, 0, selectedStar.radius + 30);
-  ctx.restore();
-  
-  // Update coordinate overlay for detail view.
-  document.getElementById('coordinates').innerText = `Detail View: ${selectedStar.name}`;
+      
+      
+    
+    // Draw the star's name below the star.
+    ctx.font = "20px 'Open Sans'";
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "center";
+    ctx.fillText(selectedStar.name, 0, detailStarRadius + 30);
+    ctx.restore();
+    
+    // Update coordinate overlay for detail view.
+    document.getElementById('coordinates').innerText = `Detail View: ${selectedStar.name}`;
 }
+  
